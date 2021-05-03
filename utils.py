@@ -1,7 +1,12 @@
+#Several Preprocessing functions have been used from for talking in the LSMS files and downloading the images.
+
 import pandas as pd
 import numpy as np
 import os
 import geoio
+import sys
+sys.path.append(BASE_DIR)
+from utils import create_space
 
 def process_malawi():
     lsms_dir = os.path.join(COUNTRIES_DIR, 'malawi_2016', 'LSMS')
@@ -104,3 +109,279 @@ def process_nigeria():
     df_clusters['cons_pc'] = df_clusters['cons_ph'] / df_clusters['pph'] # divides total cluster income by people
     df_clusters['country'] = 'ng'
     return df_clusters[['country', 'cluster_lat', 'cluster_lon', 'cons_pc']]
+
+def add_nightlights(df, tif, tif_array):
+    ''' 
+    This takes a dataframe with columns cluster_lat, cluster_lon and finds the average 
+    nightlights in 2015 using a 10kmx10km box around the point
+    
+    I try all the nighlights tifs until a match is found, or none are left upon which an error is raised
+    '''
+    cluster_nightlights = []
+    for i,r in df.iterrows():
+        min_lat, min_lon, max_lat, max_lon = create_space(r.cluster_lat, r.cluster_lon)
+        
+        xminPixel, ymaxPixel = tif.proj_to_raster(min_lon, min_lat)
+        xmaxPixel, yminPixel = tif.proj_to_raster(max_lon, max_lat)
+        assert xminPixel < xmaxPixel, print(r.cluster_lat, r.cluster_lon)
+        assert yminPixel < ymaxPixel, print(r.cluster_lat, r.cluster_lon)
+        if xminPixel < 0 or xmaxPixel >= tif_array.shape[1]:
+            print(f"no match for {r.cluster_lat}, {r.cluster_lon}")
+            raise ValueError()
+        elif yminPixel < 0 or ymaxPixel >= tif_array.shape[0]:
+            print(f"no match for {r.cluster_lat}, {r.cluster_lon}")
+            raise ValueError()
+        xminPixel, yminPixel, xmaxPixel, ymaxPixel = int(xminPixel), int(yminPixel), int(xmaxPixel), int(ymaxPixel)
+        cluster_nightlights.append(tif_array[yminPixel:ymaxPixel,xminPixel:xmaxPixel].mean())
+        
+    df['nightlights'] = cluster_nightlights
+
+def generate_download_locations(df, ipc=50):
+    '''
+    Takes a dataframe with columns cluster_lat, cluster_lon
+    Generates a 10km x 10km bounding box around the cluster and samples 
+    ipc images per cluster. First samples in a grid fashion, then any 
+    remaining points are randomly (uniformly) chosen
+    '''
+    np.random.seed(RANDOM_SEED) # for reproducability
+    df_download = {'image_name': [], 'image_lat': [], 'image_lon': [], 'cluster_lat': [], 
+                   'cluster_lon': [], 'cons_pc': [], 'nightlights': [] }
+    
+    # side length of square for uniform distribution
+    edge_num = math.floor(math.sqrt(ipc))
+    for _, r in df.iterrows():
+        min_lat, min_lon, max_lat, max_lon = create_space(r.cluster_lat, r.cluster_lon)
+        lats = np.linspace(min_lat, max_lat, edge_num).tolist()
+        lons = np.linspace(min_lon, max_lon, edge_num).tolist()
+
+        # performs cartesian product
+        uniform_points = np.transpose([np.tile(lats, len(lons)), np.repeat(lons, len(lats))])
+        
+        lats = uniform_points[:,0].tolist()
+        lons = uniform_points[:,1].tolist()
+        
+        # fills the remainder with random points
+        for _ in range(ipc - edge_num * edge_num):
+            lat = random.uniform(min_lat, max_lat)
+            lon = random.uniform(min_lon, max_lon)
+            lats.append(lat)
+            lons.append(lon)
+        
+        # add to dict
+        for lat, lon in zip(lats, lons):
+            # image name is going to be image_lat_image_lon_cluster_lat_cluster_lon.png
+            image_name = str(lat) + '_' + str(lon) + '_' + str(r.cluster_lat) + '_' + str(r.cluster_lon) + '.png'
+            df_download['image_name'].append(image_name)
+            df_download['image_lat'].append(lat)
+            df_download['image_lon'].append(lon)
+            df_download['cluster_lat'].append(r.cluster_lat)
+            df_download['cluster_lon'].append(r.cluster_lon)
+            df_download['cons_pc'].append(r.cons_pc)
+            df_download['nightlights'].append(r.nightlights)
+        
+    return pd.DataFrame.from_dict(df_download)
+
+    def download_images(df):
+    """
+    Download images using a pandas DataFrame that has "image_lat", "image_lon", "image_name", "country" as columns
+    
+    Saves images to the corresponding country's images folder
+
+    To use the Google Downloader, switch PlanetDownloader to GoogleDownloader and make imd.download_image only
+    provide lat and lon as arguments. Use zoom = 16.
+    """
+    access = None
+    with open(ACCESS_TOKEN_DIR, 'r') as f:
+        access = f.readlines()[0]
+    imd = PlanetDownloader(access)
+    num_retries = 20
+    wait_time = 0.1 # seconds
+
+    # drops what is already downloaded
+    already_downloaded = os.listdir(os.path.join(COUNTRIES_DIR, 'malawi_2016', 'images')) + \
+                        os.listdir(os.path.join(COUNTRIES_DIR, 'ethiopia_2015', 'images')) + \
+                        os.listdir(os.path.join(COUNTRIES_DIR, 'nigeria_2015', 'images'))
+    already_downloaded =  list(set(already_downloaded).intersection(set(df['image_name'])))
+    print('Already downloaded ' + str(len(already_downloaded)))
+    df = df.set_index('image_name').drop(already_downloaded).reset_index()
+    print('Need to download ' + str(len(df)))
+    # use three years of images to find one that matches search critera
+    min_year = 2014
+    min_month = 1
+    max_year = 2016
+    max_month = 12
+    for _, r in tqdm(df.iterrows(), total=df.shape[0]):
+        lat = r.image_lat
+        lon = r.image_lon
+        name = r.image_name
+        country_dir = None
+        if r.country == 'mw':
+            country_dir = 'malawi_2016'
+        elif r.country == 'eth':
+            country_dir = 'ethiopia_2015'
+        elif r.country == 'ng':
+            country_dir = 'nigeria_2015'
+        else:
+            print(f"unrecognized country: {r.country}")
+            raise ValueError()
+        image_save_path = os.path.join(COUNTRIES_DIR, country_dir, 'images', r.image_name)
+        try:
+            im = imd.download_image(lat, lon, min_year, min_month, max_year, max_month)
+            if (type(im) == str and im == 'RETRY') or im is None:
+                resolved = False
+                for _ in range(num_retries):
+                    time.sleep(wait_time)
+                    im = imd.download_image(lat, lon, min_year, min_month, max_year, max_month)
+                    if (type(im) == str and im == 'RETRY') or im is None:
+                        continue
+                    else:
+                        plt.imsave(image_save_path, im)
+                        resolved = True
+                        break
+                if not resolved:
+                    print(f'Could not download {lat}, {lon} despite several retries and waiting')
+                    continue
+                else:
+                    pass
+            else:
+                # no issues, save according to naming convention
+                plt.imsave(image_save_path, im)
+
+        except Exception as e:
+            logging.error(f"Error-could not download {lat}, {lon}", exc_info=True)
+            continue
+
+def download_images(df):
+    """
+    Download images using a pandas DataFrame that has "image_lat", "image_lon", "image_name", "country" as columns
+    
+    Saves images to the corresponding country's images folder
+
+    To use the Google Downloader, switch PlanetDownloader to GoogleDownloader and make imd.download_image only
+    provide lat and lon as arguments. Use zoom = 16.
+    """
+    access = None
+    with open(ACCESS_TOKEN_DIR, 'r') as f:
+        access = f.readlines()[0]
+    imd = PlanetDownloader(access)
+    num_retries = 20
+    wait_time = 0.1 # seconds
+
+    # drops what is already downloaded
+    already_downloaded = os.listdir(os.path.join(COUNTRIES_DIR, 'malawi_2016', 'images')) + \
+                        os.listdir(os.path.join(COUNTRIES_DIR, 'ethiopia_2015', 'images')) + \
+                        os.listdir(os.path.join(COUNTRIES_DIR, 'nigeria_2015', 'images'))
+    already_downloaded =  list(set(already_downloaded).intersection(set(df['image_name'])))
+    print('Already downloaded ' + str(len(already_downloaded)))
+    df = df.set_index('image_name').drop(already_downloaded).reset_index()
+    print('Need to download ' + str(len(df)))
+    # use three years of images to find one that matches search critera
+    min_year = 2014
+    min_month = 1
+    max_year = 2016
+    max_month = 12
+    for _, r in tqdm(df.iterrows(), total=df.shape[0]):
+        lat = r.image_lat
+        lon = r.image_lon
+        name = r.image_name
+        country_dir = None
+        if r.country == 'mw':
+            country_dir = 'malawi_2016'
+        elif r.country == 'eth':
+            country_dir = 'ethiopia_2015'
+        elif r.country == 'ng':
+            country_dir = 'nigeria_2015'
+        else:
+            print(f"unrecognized country: {r.country}")
+            raise ValueError()
+        image_save_path = os.path.join(COUNTRIES_DIR, country_dir, 'images', r.image_name)
+        try:
+            im = imd.download_image(lat, lon, min_year, min_month, max_year, max_month)
+            if (type(im) == str and im == 'RETRY') or im is None:
+                resolved = False
+                for _ in range(num_retries):
+                    time.sleep(wait_time)
+                    im = imd.download_image(lat, lon, min_year, min_month, max_year, max_month)
+                    if (type(im) == str and im == 'RETRY') or im is None:
+                        continue
+                    else:
+                        plt.imsave(image_save_path, im)
+                        resolved = True
+                        break
+                if not resolved:
+                    print(f'Could not download {lat}, {lon} despite several retries and waiting')
+                    continue
+                else:
+                    pass
+            else:
+                # no issues, save according to naming convention
+                plt.imsave(image_save_path, im)
+
+        except Exception as e:
+            logging.error(f"Error-could not download {lat}, {lon}", exc_info=True)
+            continue
+
+
+def load_data():
+
+    # Training Data
+    trainingImages = []
+    trainingLabels = []
+
+    path0 = 'cnn_images/train/0/'
+    path1 = 'cnn_images/train/1/'
+    path2 = 'cnn_images/train/2/'
+
+    class_0_train = os.listdir(path_0)
+    class_2_train = os.listdir(path_2)
+    class_3_train = os.listdir(path_3)
+
+    for i in [class_0_train, class_2_train, class_3_train]:
+        for x in i:
+            trainingLabels.append(0)
+            if(i == class_0)
+                trainingImages.append(path0_train + x)
+            elif(i == class_1):
+                trainingImages.append(path1_train + x)
+            else:
+                trainingImages.append(path2_train + x)
+
+    # Testing Data
+    testingImages = []
+    testingImages = []
+    path0_test  = 'cnn_images/valid/0/'
+    path1_test  = 'cnn_images/valid/1/'
+    path2_test  = 'cnn_images/valid/2/'
+
+    class_0_test = os.listdir(path_0_test )
+    class_2 = os.listdir(path_2_test_test  )
+    class_3 = os.listdir(path_3_test_test  )
+
+    for i in [class_0_test , class_2_test , class_3_test]:
+        for x in i:
+            trainingLabels.append(0)
+            if(i == class_0)
+                trainingImages.append(path0_test  + x)
+            elif(i == class_1):
+                trainingImages.append(path1_test  + x)
+            else:
+                trainingImages.append(path2_test  + x)
+
+    return trainingLabels, trainingImages, testingLabels, testingImages
+
+def load_country(country):
+
+    data = None
+
+    if("malawi"):
+        data = np.loadtxt('features/malawi_features.csv')
+    elif("nigeria"):
+        data = np.loadtxt('features/nigeria.csv')
+    else:
+        data = np.loadtxt('features/ethiopia.csv')
+
+    return data
+
+
+    
+    
