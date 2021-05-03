@@ -1,4 +1,5 @@
 #Several Preprocessing functions have been used from for talking in the LSMS files and downloading the images.
+#https : / /github.com/jmather625/predicting-poverty-replication
 
 import pandas as pd
 import numpy as np
@@ -322,65 +323,7 @@ def download_images(df):
             continue
 
 
-def load_data():
 
-    # Training Data
-    trainingImages = []
-    trainingLabels = []
-
-    path0 = 'cnn_images/train/0/'
-    path1 = 'cnn_images/train/1/'
-    path2 = 'cnn_images/train/2/'
-
-    class_0_train = os.listdir(path_0)
-    class_2_train = os.listdir(path_2)
-    class_3_train = os.listdir(path_3)
-
-    for i in [class_0_train, class_2_train, class_3_train]:
-        for x in i:
-            trainingLabels.append(0)
-            if(i == class_0)
-                trainingImages.append(path0_train + x)
-            elif(i == class_1):
-                trainingImages.append(path1_train + x)
-            else:
-                trainingImages.append(path2_train + x)
-
-    # Testing Data
-    testingImages = []
-    testingImages = []
-    path0_test  = 'cnn_images/valid/0/'
-    path1_test  = 'cnn_images/valid/1/'
-    path2_test  = 'cnn_images/valid/2/'
-
-    class_0_test = os.listdir(path_0_test )
-    class_2 = os.listdir(path_2_test_test  )
-    class_3 = os.listdir(path_3_test_test  )
-
-    for i in [class_0_test , class_2_test , class_3_test]:
-        for x in i:
-            trainingLabels.append(0)
-            if(i == class_0)
-                trainingImages.append(path0_test  + x)
-            elif(i == class_1):
-                trainingImages.append(path1_test  + x)
-            else:
-                trainingImages.append(path2_test  + x)
-
-    return trainingLabels, trainingImages, testingLabels, testingImages
-
-def load_country(country):
-
-    data = None
-
-    if("malawi"):
-        data = np.loadtxt('features/malawi_features.csv')
-    elif("nigeria"):
-        data = np.loadtxt('features/nigeria.csv')
-    else:
-        data = np.loadtxt('features/ethiopia.csv')
-
-    return data
 
 
     

@@ -10,39 +10,61 @@ from scipy import stats
 from keras.preprocessing import image
 from imagenet_utils import preprocess_input, decode_predictions
 
+def getAlexNet(num_classes):
+    model = keras.models.Sequential([
+    keras.layers.Conv2D(filters=96, kernel_size=(11,11), strides=(4,4), activation='relu', input_shape=(227,227,3)),
+    keras.layers.BatchNormalization(),
+    keras.layers.MaxPool2D(pool_size=(3,3), strides=(2,2)),
+    keras.layers.Conv2D(filters=256, kernel_size=(5,5), strides=(1,1), activation='relu', padding="same"),
+    keras.layers.BatchNormalization(),
+    keras.layers.MaxPool2D(pool_size=(3,3), strides=(2,2)),
+    keras.layers.Conv2D(filters=384, kernel_size=(3,3), strides=(1,1), activation='relu', padding="same"),
+    keras.layers.BatchNormalization(),
+    keras.layers.Conv2D(filters=384, kernel_size=(3,3), strides=(1,1), activation='relu', padding="same"),
+    keras.layers.BatchNormalization(),
+    keras.layers.Conv2D(filters=256, kernel_size=(3,3), strides=(1,1), activation='relu', padding="same"),
+    keras.layers.BatchNormalization(),
+    keras.layers.MaxPool2D(pool_size=(3,3), strides=(2,2)),
+    keras.layers.Flatten(),
+    keras.layers.Dense(4096, activation='relu'),
+    keras.layers.Dropout(0.5),
+    keras.layers.Dense(4096, activation='relu'),
+    keras.layers.Dropout(0.5),
+    keras.layers.Dense(3, activation='softmax')
+    ])
+    return model
+
+def getAlexNetFeat(model):
+    ret_model = model
+    ret_model.pop()
+    ret_model.pop()
+    return ret_model
+
 def model(name):
-
     base_model = None
-
     if(name == 'vgg'):
-        base_model = tf.keras.applications.VGG19(input_shape=(224, 244, 3),
+        base_model = tf.keras.applications.VGG16(input_shape=(224, 244, 3),
                                                include_top=True,
                                                weights='imagenet')
-
     if(name == 'alexnet'):
-        base_model = tf.keras.applications.Resnet(input_shape=(224, 244, 3),
-                                               include_top=True,
-                                               weights='imagenet')
-
+        base_model = getAlexNet(3)
     base_model.compile(optimizer=tf.keras.optimizers.Adam(lr=base_learning_rate= 0.001),
               loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
               metrics=['accuracy'])
-
     return base_model
 
 def extraction_model(name):
-    base_model = None
-
+    base_model = base_model if base_model is not None and name =='alexnet' else getAlexNet()
     if(name == 'vgg'):
-        base_model = tf.keras.applications.VGG19(input_shape=(224, 244, 3),
+        base_model = tf.keras.applications.VGG16(input_shape=(224, 244, 3),
                                                include_top=False,
                                                weights='imagenet')
-
     if(name == 'alexnet'):
-        base_model = tf.keras.applications.Resnet(input_shape=(224, 244, 3),
-                                               include_top=False,
-                                               weights='imagenet')
+        base_model = getAlexNetFeat()
     
+    base_model.compile(optimizer=tf.keras.optimizers.Adam(lr=base_learning_rate= 0.001),
+              loss=tf.keras.losses.BinaryCrossentropy(from_logits=True),
+              metrics=['accuracy'])
     return base_model
 
 def feature_extraction(model, images):
@@ -65,22 +87,21 @@ def image_feature_creation(model, folders):
         features = feature_extraction(model, folders):
         return features
 
-def data_transformer():
-    data_transforms = {
-    'train': transforms.Compose([
-        transforms.RandomResizedCrop(input_size),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-    'valid': transforms.Compose([
-        transforms.Resize(input_size),
-        transforms.CenterCrop(input_size),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ]),
-}
+def data_transformer(image):
 
+    train_gen = tf.keras.preprocessing.image.ImageDataGenerator(
+        rotation_range=20,
+        featurewise_std_normalization=True,
+        featurewise_center=True,
+        horizontal_flip=True,
+        vertical_flip=True)
+    data_transformer = train_gen.flow_from_directory(
+        batch_size=16,
+        directory=image
+        shuffle=True,
+        target_size=(224, 224),
+        class_mode= None)
+        
     return data_transformer
 
 def regression(data):
@@ -107,7 +128,7 @@ def regression(data):
             regression.fit(x_train, y_train)
             y_new = regression.predict(x_test)
             score = stats.pearsonr(y_test, y_new)
-
+            score = score * score
             if(score > best_score):
                 best_score = score
    
@@ -138,3 +159,64 @@ def plot(history):
     plt.title('Training and Validation Loss')
     plt.xlabel('epoch')
     plt.show()
+
+def load_data():
+
+    # Training Data
+    trainingImages = []
+    trainingLabels = []
+
+    path0 = 'cnn_images/train/0/'
+    path1 = 'cnn_images/train/1/'
+    path2 = 'cnn_images/train/2/'
+
+    class_0_train = os.listdir(path_0)
+    class_2_train = os.listdir(path_2)
+    class_3_train = os.listdir(path_3)
+
+    for i in [class_0_train, class_2_train, class_3_train]:
+        for x in i:
+            trainingLabels.append(0)
+            if(i == class_0)
+                trainingImages.append(path0_train + x)
+            elif(i == class_1):
+                trainingImages.append(path1_train + x)
+            else:
+                trainingImages.append(path2_train + x)
+
+    # Testing Data
+    testingImages = []
+    testingImages = []
+    path0_test  = 'cnn_images/valid/0/'
+    path1_test  = 'cnn_images/valid/1/'
+    path2_test  = 'cnn_images/valid/2/'
+
+    class_0_test = os.listdir(path_0_test )
+    class_2 = os.listdir(path_2_test_test  )
+    class_3 = os.listdir(path_3_test_test  )
+
+    for i in [class_0_test , class_2_test , class_3_test]:
+        for x in i:
+            trainingLabels.append(0)
+            if(i == class_0)
+                trainingImages.append(path0_test  + x)
+            elif(i == class_1):
+                trainingImages.append(path1_test  + x)
+            else:
+                trainingImages.append(path2_test  + x)
+
+    return trainingLabels, trainingImages, testingLabels, testingImages
+
+def load_country(country):
+
+    data = None
+
+    if("malawi"):
+        data = np.loadtxt('features/malawi_features.csv')
+    elif("nigeria"):
+        data = np.loadtxt('features/nigeria.csv')
+    else:
+        data = np.loadtxt('features/ethiopia.csv')
+
+    return data
+
